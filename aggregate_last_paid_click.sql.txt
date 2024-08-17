@@ -1,0 +1,90 @@
+with last_visits as (
+    select
+        visitor_id,
+        MAX(visit_date) as visit_date
+    from sessions
+    group by visitor_id
+),
+
+last_paid_click as (
+    select
+        lv.visitor_id,
+        s.source as utm_source,
+        s.medium as utm_medium,
+        s.campaign as utm_campaign,
+        l.lead_id,
+        l.created_at,
+        l.amount,
+        l.closing_reason,
+        l.status_id,
+        DATE(lv.visit_date) as visit_date
+    from last_visits as lv
+    inner join sessions as s on lv.visit_date = s.visit_date
+    left join
+        leads as l
+        on lv.visitor_id = l.visitor_id and lv.visit_date <= l.created_at
+    where s.medium in ('cpc', 'cpm', 'cpa', 'youtube', 'cpp', 'tg', 'social')
+    order by
+        l.amount desc nulls last,
+        lv.visit_date asc,
+        utm_source asc,
+        utm_medium asc,
+        utm_campaign asc
+),
+
+ads as (
+    select
+        DATE(campaign_date) as campaign_date,
+        ad_id,
+        campaign_id,
+        campaign_name,
+        utm_source,
+        utm_medium,
+        utm_campaign,
+        utm_content,
+        daily_spent
+    from vk_ads
+
+    union
+
+    select
+        DATE(campaign_date) as campaign_date,
+        ad_id,
+        campaign_id,
+        campaign_name,
+        utm_source,
+        utm_medium,
+        utm_campaign,
+        utm_content,
+        daily_spent
+    from ya_ads
+)
+
+select distinct
+    lpc.visit_date,
+    lpc.utm_source,
+    lpc.utm_medium,
+    lpc.utm_campaign,
+    COUNT(lpc.visitor_id) as visitors_count,
+    SUM(ads.daily_spent) as total_cost,
+    COUNT(lpc.lead_id) as leads_count,
+    COUNT(lpc.closing_reason) filter (
+        where lpc.closing_reason = 'Успешная продажа' or lpc.status_id = 142
+    ) as purchases_count,
+    SUM(lpc.amount) as revenue
+from last_paid_click as lpc
+left join ads on lpc.visit_date = ads.campaign_date
+group by
+    visit_date,
+    lpc.utm_source,
+    lpc.utm_medium,
+    lpc.utm_campaign,
+    lpc.closing_reason
+order by
+    revenue desc nulls last,
+    visit_date asc,
+    visitors_count desc,
+    utm_source asc,
+    utm_medium asc,
+    utm_campaign asc;
+
